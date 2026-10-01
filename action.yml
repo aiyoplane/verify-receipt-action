@@ -1,0 +1,256 @@
+# aiyoplane/verify-receipt-action
+#
+# Verify an Aiyo execution receipt inside a GitHub Actions workflow.
+#
+# Use case: a deploy pipeline requires an authorized human- or agent-produced
+# approval before releasing. The workflow calls this action to confirm the
+# receipt is valid and current. On a bad receipt, the action exits non-zero
+# and the workflow stops.
+#
+# Repository: https://github.com/aiyoplane/verify-receipt-action
+# Published by: Aiyoplane, Inc. - Apache 2.0 licensed
+# https://aiyoplane.com
+
+name: 'Aiyo Verify Receipt'
+description: >
+  Verify an Aiyo execution receipt against Aiyo's published JWKS. Fails the
+  workflow if the receipt is invalid, expired, or tampered with. Zero
+  coordination with Aiyo required at verification time.
+author: 'Aiyoplane, Inc.'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  receipt:
+    description: >
+      The Aiyo execution receipt to verify. Accepts either the receipt
+      string directly or a path to a file containing the receipt. Use the
+      `receipt-source` input to disambiguate.
+    required: true
+
+  receipt-source:
+    description: >
+      One of "string" (default; `receipt` input is the receipt itself) or
+      "file" (`receipt` input is a path to a file containing the receipt).
+    required: false
+    default: 'string'
+
+  jwks-url:
+    description: >
+      Override the JWKS URL used for verification. Defaults to Aiyo's
+      production endpoint. Use this if you run a self-hosted Aiyo instance
+      or need to pin to a specific environment.
+    required: false
+    default: 'https://api.aiyoplane.com/.well-known/aiyo-jwks.json'
+
+  verify-version:
+    description: >
+      The exact version of the @aiyoplane/verify npm package to use for
+      verification. Defaults to the specific version this Action was tested
+      against. Pin to a different version if your workflow requires a
+      specific verifier revision; use "latest" only if you have reviewed
+      the security tradeoff (automatic upgrade of a security primitive).
+      Accepts any valid npm version specifier (exact, caret-range, etc.).
+    required: false
+    default: '1.0.1'
+
+  fail-on-invalid:
+    description: >
+      Whether to fail the workflow when the receipt is invalid. Defaults to
+      "true" — matching the fail-closed posture AEAP specifies for the
+      Runtime Decision Point. Set to "false" to run in advisory mode: the
+      workflow continues regardless and you inspect the `verified`,
+      `verdict`, and `error-code` outputs manually.
+    required: false
+    default: 'true'
+
+outputs:
+  verified:
+    description: >
+      "true" if the receipt is cryptographically authentic (signature valid,
+      issuer identity verified via JWKS, structure well-formed, not
+      expired). "false" otherwise. NOTE: this is a cryptographic
+      authenticity claim, NOT an authorization claim — see `verdict`.
+    value: ${{ steps.verify.outputs.verified }}
+  verdict:
+    description: >
+      The authorization decision carried in the receipt. One of "ALLOW",
+      "ESCALATE", "BLOCK", or empty when the receipt failed to verify. For
+      receipts in the current format (v1 HMAC, v2 Ed25519), an issued
+      receipt means ALLOW; future AEAP Full conformance will carry
+      ESCALATE and BLOCK receipts for auditable non-ALLOW lineage.
+      IMPORTANT: `verified == 'true'` and `verdict == 'ALLOW'` are
+      separate claims. A receipt may be cryptographically authentic
+      (`verified == true`) while carrying a non-ALLOW verdict.
+    value: ${{ steps.verify.outputs.verdict }}
+  intent-id:
+    description: The `iid` claim from the verified receipt (empty on failure).
+    value: ${{ steps.verify.outputs.intent-id }}
+  context-id:
+    description: The `cid` claim from the verified receipt (empty if not present).
+    value: ${{ steps.verify.outputs.context-id }}
+  merchant-id:
+    description: The `mid` claim from the verified receipt (empty on failure).
+    value: ${{ steps.verify.outputs.merchant-id }}
+  issued-at:
+    description: The `iat` claim as an ISO-8601 timestamp (empty on failure).
+    value: ${{ steps.verify.outputs.issued-at }}
+  expires-at:
+    description: The `exp` claim as an ISO-8601 timestamp (empty on failure).
+    value: ${{ steps.verify.outputs.expires-at }}
+  verifier-version:
+    description: >
+      The exact @aiyoplane/verify version that performed the verification.
+      Useful for audit trails and reproducibility reports.
+    value: ${{ steps.verify.outputs.verifier-version }}
+  error:
+    description: Error message if verification failed; empty on success.
+    value: ${{ steps.verify.outputs.error }}
+  error-code:
+    description: >
+      Typed error code if verification failed. One of RECEIPT_FORMAT,
+      SIGNATURE_INVALID, RECEIPT_EXPIRED, JWKS_FETCH, UNKNOWN_KEY,
+      UNSUPPORTED_VERSION, USAGE_ERROR. Empty on success.
+    value: ${{ steps.verify.outputs.error-code }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Verify the receipt
+      id: verify
+      shell: bash
+      env:
+        AIYO_INPUT_RECEIPT: ${{ inputs.receipt }}
+        AIYO_INPUT_RECEIPT_SOURCE: ${{ inputs.receipt-source }}
+        AIYO_INPUT_JWKS_URL: ${{ inputs.jwks-url }}
+        AIYO_INPUT_VERIFY_VERSION: ${{ inputs.verify-version }}
+        AIYO_INPUT_FAIL_ON_INVALID: ${{ inputs.fail-on-invalid }}
+      run: |
+        set -e
+
+        # Resolve the receipt string from the inputs.
+        if [ "$AIYO_INPUT_RECEIPT_SOURCE" = "file" ]; then
+          if [ ! -f "$AIYO_INPUT_RECEIPT" ]; then
+            echo "::error title=Aiyo Verify Receipt::Receipt file not found: $AIYO_INPUT_RECEIPT"
+            {
+              echo "verified=false"
+              echo "verdict="
+              echo "verifier-version=$AIYO_INPUT_VERIFY_VERSION"
+              echo "error=Receipt file not found: $AIYO_INPUT_RECEIPT"
+              echo "error-code=USAGE_ERROR"
+            } >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          RECEIPT=$(cat "$AIYO_INPUT_RECEIPT")
+        elif [ "$AIYO_INPUT_RECEIPT_SOURCE" = "string" ]; then
+          RECEIPT="$AIYO_INPUT_RECEIPT"
+        else
+          echo "::error title=Aiyo Verify Receipt::Invalid receipt-source '$AIYO_INPUT_RECEIPT_SOURCE' (must be 'string' or 'file')"
+          {
+            echo "verified=false"
+            echo "verdict="
+            echo "verifier-version=$AIYO_INPUT_VERIFY_VERSION"
+            echo "error=Invalid receipt-source"
+            echo "error-code=USAGE_ERROR"
+          } >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        # Invoke the verifier via npx against the pinned verifier version.
+        # Defaulting to a pinned version (not @latest) is a deliberate
+        # security posture: workflow authors should opt in to automatic
+        # upgrades of a security primitive, not inherit them by default.
+        VERIFY_PACKAGE="@aiyoplane/verify@$AIYO_INPUT_VERIFY_VERSION"
+        VERIFY_OUTPUT=$(printf '%s' "$RECEIPT" | npx --yes "$VERIFY_PACKAGE" \
+          --jwks-url "$AIYO_INPUT_JWKS_URL" \
+          --json - 2>&1) && STATUS=0 || STATUS=$?
+
+        if [ "$STATUS" -eq 0 ]; then
+          VALID=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print('true' if d.get('valid') else 'false')")
+          if [ "$VALID" = "true" ]; then
+            IID=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print(d['claims'].get('iid',''))")
+            CID=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print(d['claims'].get('cid',''))")
+            MID=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print(d['claims'].get('mid',''))")
+            IAT=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json, datetime; d=json.loads(sys.stdin.read()); print(datetime.datetime.fromtimestamp(float(d['claims']['iat']), tz=datetime.timezone.utc).isoformat())")
+            EXP=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json, datetime; d=json.loads(sys.stdin.read()); print(datetime.datetime.fromtimestamp(float(d['claims']['exp']), tz=datetime.timezone.utc).isoformat())")
+            # Verdict extraction. Current receipt formats (v1 HMAC, v2 Ed25519)
+            # are issued on ALLOW by convention — an issued receipt means ALLOW.
+            # AEAP Full conformance will add explicit `verdict` claims for
+            # ESCALATE/BLOCK lineage. Prefer the explicit claim when present;
+            # otherwise default to ALLOW to match the current issuance
+            # convention. Normalized to uppercase.
+            VERDICT=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print((d['claims'].get('verdict') or 'ALLOW').upper())")
+            # The verifier package may report its own version in the JSON
+            # payload; fall back to the pinned input value for audit output.
+            VERIFIER_VERSION=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json; d=json.loads(sys.stdin.read()); print(d.get('verifier_version') or '')" 2>/dev/null || echo "")
+            if [ -z "$VERIFIER_VERSION" ]; then
+              VERIFIER_VERSION="$AIYO_INPUT_VERIFY_VERSION"
+            fi
+            {
+              echo "verified=true"
+              echo "verdict=$VERDICT"
+              echo "intent-id=$IID"
+              echo "context-id=$CID"
+              echo "merchant-id=$MID"
+              echo "issued-at=$IAT"
+              echo "expires-at=$EXP"
+              echo "verifier-version=$VERIFIER_VERSION"
+              echo "error="
+              echo "error-code="
+            } >> "$GITHUB_OUTPUT"
+            echo "::notice title=Aiyo Verify Receipt::Receipt verified (verdict=$VERDICT). iid=$IID mid=$MID verifier=$VERIFIER_VERSION"
+            # Fail-closed on non-ALLOW verdict. A cryptographically authentic
+            # receipt can still carry ESCALATE or BLOCK. The default posture
+            # is to fail the workflow on any non-ALLOW verdict unless the
+            # author has opted into advisory mode (fail-on-invalid=false).
+            # Advisory-mode callers inspect the `verdict` output in a
+            # subsequent step and decide what to do.
+            if [ "$VERDICT" != "ALLOW" ] && [ "$AIYO_INPUT_FAIL_ON_INVALID" = "true" ]; then
+              echo "::error title=Aiyo Verify Receipt::Receipt is authentic but carries verdict=$VERDICT. Failing closed."
+              exit 1
+            fi
+            exit 0
+          fi
+        fi
+
+        # Verification failed. Parse the error for structured output.
+        ERROR_MESSAGE=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json;
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get('error') or 'Unknown verification error')
+except Exception:
+    print(sys.stdin.read().strip() or 'Unknown verification error')" 2>/dev/null || echo "Verification failed")
+        ERROR_CODE=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json;
+try:
+    d = json.loads(sys.stdin.read())
+    print(d.get('code') or 'VERIFICATION_FAILED')
+except Exception:
+    print('VERIFICATION_FAILED')" 2>/dev/null || echo "VERIFICATION_FAILED")
+
+        {
+          echo "verified=false"
+          echo "verdict="
+          echo "intent-id="
+          echo "context-id="
+          echo "merchant-id="
+          echo "issued-at="
+          echo "expires-at="
+          echo "verifier-version=$AIYO_INPUT_VERIFY_VERSION"
+          echo "error=$ERROR_MESSAGE"
+          echo "error-code=$ERROR_CODE"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "::error title=Aiyo Verify Receipt::Receipt verification failed ($ERROR_CODE): $ERROR_MESSAGE"
+
+        if [ "$AIYO_INPUT_FAIL_ON_INVALID" = "true" ]; then
+          exit 1
+        fi
+
+        exit 0

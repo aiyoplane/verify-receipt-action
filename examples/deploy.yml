@@ -1,0 +1,43 @@
+# Example: gate a production deploy on a valid Aiyo execution receipt.
+#
+# Save this file as .github/workflows/deploy.yml in your project.
+# Trigger it from the GitHub UI, passing the receipt as the workflow input.
+
+name: Deploy to production (Aiyo-gated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      aiyo-receipt:
+        description: 'Aiyo execution receipt authorizing this deploy'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify Aiyo execution receipt
+        id: verify
+        uses: aiyoplane/verify-receipt-action@v1
+        with:
+          receipt: ${{ github.event.inputs['aiyo-receipt'] }}
+
+      - name: Deploy (only if receipt is authentic AND verdict is ALLOW)
+        # Gate on both outputs: `verified` is the cryptographic authenticity
+        # claim, `verdict` is the authorization decision. An authentic
+        # receipt carrying BLOCK or ESCALATE must NOT trigger the deploy.
+        if: steps.verify.outputs.verified == 'true' && steps.verify.outputs.verdict == 'ALLOW'
+        run: |
+          echo "Deploying with Aiyo authorization:"
+          echo "  intent_id:        ${{ steps.verify.outputs.intent-id }}"
+          echo "  merchant:         ${{ steps.verify.outputs.merchant-id }}"
+          echo "  verdict:          ${{ steps.verify.outputs.verdict }}"
+          echo "  issued_at:        ${{ steps.verify.outputs.issued-at }}"
+          echo "  expires_at:       ${{ steps.verify.outputs.expires-at }}"
+          echo "  verifier_version: ${{ steps.verify.outputs.verifier-version }}"
+          # Replace this with your actual deploy command.
+          ./deploy.sh
