@@ -220,19 +220,11 @@ runs:
           fi
         fi
 
-        # Verification failed. Parse the error for structured output.
-        ERROR_MESSAGE=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json;
-try:
-    d = json.loads(sys.stdin.read())
-    print(d.get('error') or 'Unknown verification error')
-except Exception:
-    print(sys.stdin.read().strip() or 'Unknown verification error')" 2>/dev/null || echo "Verification failed")
-        ERROR_CODE=$(printf '%s' "$VERIFY_OUTPUT" | python3 -c "import sys, json;
-try:
-    d = json.loads(sys.stdin.read())
-    print(d.get('code') or 'VERIFICATION_FAILED')
-except Exception:
-    print('VERIFICATION_FAILED')" 2>/dev/null || echo "VERIFICATION_FAILED")
+        # Verification failed. Parse the error for structured output using jq
+        # (pre-installed on all GitHub Actions runners; keeps the YAML block
+        # scalar indentation clean, unlike multi-line Python).
+        ERROR_MESSAGE=$(printf '%s' "$VERIFY_OUTPUT" | jq -r '.error // "Unknown verification error"' 2>/dev/null || echo "Verification failed")
+        ERROR_CODE=$(printf '%s' "$VERIFY_OUTPUT" | jq -r '.code // "VERIFICATION_FAILED"' 2>/dev/null || echo "VERIFICATION_FAILED")
 
         {
           echo "verified=false"
