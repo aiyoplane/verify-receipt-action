@@ -11,11 +11,11 @@
 # Published by: Aiyoplane, Inc. - Apache 2.0 licensed
 # https://aiyoplane.com
 
-name: 'Aiyo Verify Receipt'
+name: 'AEAP Receipt Verifier'
 description: >
-  Verify an Aiyo execution receipt against Aiyo's published JWKS. Fails the
-  workflow if the receipt is invalid, expired, or tampered with. Zero
-  coordination with Aiyo required at verification time.
+  Verify an AEAP execution receipt against the issuer's published JWKS. Fails
+  the workflow if the receipt is invalid, expired, or tampered with. Zero
+  coordination with the issuer required at verification time.
 author: 'Aiyoplane, Inc.'
 
 branding:
@@ -138,7 +138,7 @@ runs:
         # Resolve the receipt string from the inputs.
         if [ "$AIYO_INPUT_RECEIPT_SOURCE" = "file" ]; then
           if [ ! -f "$AIYO_INPUT_RECEIPT" ]; then
-            echo "::error title=Aiyo Verify Receipt::Receipt file not found: $AIYO_INPUT_RECEIPT"
+            echo "::error title=AEAP Receipt Verifier::Receipt file not found: $AIYO_INPUT_RECEIPT"
             {
               echo "verified=false"
               echo "verdict="
@@ -152,7 +152,7 @@ runs:
         elif [ "$AIYO_INPUT_RECEIPT_SOURCE" = "string" ]; then
           RECEIPT="$AIYO_INPUT_RECEIPT"
         else
-          echo "::error title=Aiyo Verify Receipt::Invalid receipt-source '$AIYO_INPUT_RECEIPT_SOURCE' (must be 'string' or 'file')"
+          echo "::error title=AEAP Receipt Verifier::Invalid receipt-source '$AIYO_INPUT_RECEIPT_SOURCE' (must be 'string' or 'file')"
           {
             echo "verified=false"
             echo "verdict="
@@ -205,7 +205,7 @@ runs:
               echo "error="
               echo "error-code="
             } >> "$GITHUB_OUTPUT"
-            echo "::notice title=Aiyo Verify Receipt::Receipt verified (verdict=$VERDICT). iid=$IID mid=$MID verifier=$VERIFIER_VERSION"
+            echo "::notice title=AEAP Receipt Verifier::Receipt verified (verdict=$VERDICT). iid=$IID mid=$MID verifier=$VERIFIER_VERSION"
             # Fail-closed on non-ALLOW verdict. A cryptographically authentic
             # receipt can still carry ESCALATE or BLOCK. The default posture
             # is to fail the workflow on any non-ALLOW verdict unless the
@@ -213,7 +213,7 @@ runs:
             # Advisory-mode callers inspect the `verdict` output in a
             # subsequent step and decide what to do.
             if [ "$VERDICT" != "ALLOW" ] && [ "$AIYO_INPUT_FAIL_ON_INVALID" = "true" ]; then
-              echo "::error title=Aiyo Verify Receipt::Receipt is authentic but carries verdict=$VERDICT. Failing closed."
+              echo "::error title=AEAP Receipt Verifier::Receipt is authentic but carries verdict=$VERDICT. Failing closed."
               exit 1
             fi
             exit 0
@@ -247,7 +247,7 @@ except Exception:
           echo "error-code=$ERROR_CODE"
         } >> "$GITHUB_OUTPUT"
 
-        echo "::error title=Aiyo Verify Receipt::Receipt verification failed ($ERROR_CODE): $ERROR_MESSAGE"
+        echo "::error title=AEAP Receipt Verifier::Receipt verification failed ($ERROR_CODE): $ERROR_MESSAGE"
 
         if [ "$AIYO_INPUT_FAIL_ON_INVALID" = "true" ]; then
           exit 1

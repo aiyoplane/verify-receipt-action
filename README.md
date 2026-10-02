@@ -1,4 +1,4 @@
-# Aiyo Verify Receipt — GitHub Action
+# AEAP Receipt Verifier — GitHub Action
 
 **An ecosystem adapter that distributes Aiyo's canonical verification primitive into GitHub Actions workflows.**
 
