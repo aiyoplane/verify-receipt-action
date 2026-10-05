@@ -12,10 +12,7 @@
 # https://aiyoplane.com
 
 name: 'AEAP Receipt Verifier'
-description: >
-  Verify an AEAP execution receipt against the issuer's published JWKS. Fails
-  the workflow if the receipt is invalid, expired, or tampered with. Zero
-  coordination with the issuer required at verification time.
+description: "Verify AEAP execution receipts offline against the issuer's JWKS. Fails on invalid, expired, or tampered receipts."
 author: 'Aiyoplane, Inc.'
 
 branding:
